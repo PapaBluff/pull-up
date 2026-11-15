@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import CheckInButton from '../../../../components/CheckInButton.tsx'
+import CheckInButton from '../../../../components/CheckInButton'
 import Link from 'next/link'
 import { ArrowLeft, Calendar, DollarSign, User } from 'lucide-react'
 
