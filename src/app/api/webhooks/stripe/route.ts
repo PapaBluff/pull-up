@@ -1,65 +1,78 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Stripe from 'stripe'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2026-01-28' as any,
-})
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
 export async function POST(request: Request) {
-  const rawBody = await request.text()
-  const signature = request.headers.get('stripe-signature')!
-
-  let event: Stripe.Event
-
   try {
-    event = stripe.webhooks.constructEvent(
-      rawBody,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    )
-  } catch (err: any) {
-    console.error('Stripe webhook signature verification failed:', err.message)
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
-  }
-
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object as Stripe.Checkout.Session
-    const meta = session.metadata
-
-    if (meta?.buyer_id && meta?.creator_id) {
-      const { error } = await supabaseAdmin.from('bookings').upsert(
-        {
-          stripe_session_id: session.id,
-          buyer_id: meta.buyer_id,
-          creator_id: meta.creator_id,
-          venue_name: meta.venue_name,
-          event_address: meta.event_address,
-          venue_lat: meta.venue_lat ? Number(meta.venue_lat) : null,
-          venue_lng: meta.venue_lng ? Number(meta.venue_lng) : null,
-          scheduled_at: meta.scheduled_at,
-          creator_payout: Number(meta.creator_payout),
-          platform_fee: Number(meta.platform_fee),
-          total_amount: Number(meta.total_amount),
-          handshake_pin: meta.handshake_pin,
-          arrival_status: 'pending',
-          payout_status: 'escrow_held',
-          status: 'confirmed',
-        },
-        { onConflict: 'stripe_session_id' }
+    if (
+      !process.env.STRIPE_SECRET_KEY ||
+      !process.env.STRIPE_WEBHOOK_SECRET ||
+      !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      !process.env.SUPABASE_SERVICE_ROLE_KEY
+    ) {
+      return NextResponse.json(
+        { error: 'Server misconfiguration: Missing webhook or Supabase environment variables.' },
+        { status: 500 }
       )
+    }
 
-      if (error) {
-        console.error('Failed to insert booking from Stripe webhook:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: '2026-01-28' as any,
+    })
+
+    const supabaseAdmin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    )
+
+    const body = await request.text()
+    const signature = request.headers.get('stripe-signature')
+
+    if (!signature) {
+      return NextResponse.json({ error: 'Missing stripe-signature header' }, { status: 400 })
+    }
+
+    let event: Stripe.Event
+
+    try {
+      event = stripe.webhooks.constructEvent(body, signature, process.env.STRIPE_WEBHOOK_SECRET)
+    } catch (err: any) {
+      console.error('Stripe webhook signature verification failed:', err.message)
+      return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 })
+    }
+
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object as Stripe.Checkout.Session
+      const metadata = session.metadata || {}
+
+      const { error: insertError } = await supabaseAdmin.from('bookings').insert({
+        buyer_id: metadata.buyer_id,
+        creator_id: metadata.creator_id,
+        venue_name: metadata.venue_name,
+        event_address: metadata.event_address,
+        venue_lat: metadata.venue_lat ? Number(metadata.venue_lat) : null,
+        venue_lng: metadata.venue_lng ? Number(metadata.venue_lng) : null,
+        scheduled_at: metadata.scheduled_at,
+        creator_payout: Number(metadata.creator_payout || 0),
+        platform_fee: Number(metadata.platform_fee || 0),
+        total_amount: Number(metadata.total_amount || 0),
+        handshake_pin: metadata.handshake_pin,
+        stripe_checkout_session_id: session.id,
+        stripe_payment_intent_id:
+          typeof session.payment_intent === 'string' ? session.payment_intent : null,
+        status: 'confirmed',
+        payout_status: 'escrowed',
+      })
+
+      if (insertError) {
+        console.error('Failed to insert booking from Stripe webhook:', insertError)
+        return NextResponse.json({ error: 'Database insert failed' }, { status: 500 })
       }
     }
-  }
 
-  return NextResponse.json({ received: true })
+    return NextResponse.json({ received: true })
+  } catch (err: any) {
+    console.error('Stripe webhook handler error:', err)
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
 }

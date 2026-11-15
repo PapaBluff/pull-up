@@ -2,17 +2,36 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Stripe from 'stripe'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2026-01-28' as any,
-})
-
 export async function POST(request: Request) {
   try {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return NextResponse.json(
+        { error: 'Server misconfiguration: STRIPE_SECRET_KEY is missing.' },
+        { status: 500 }
+      )
+    }
+
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: '2026-01-28' as any,
+    })
+
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+
+    const authHeader = request.headers.get('authorization')
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined
+
+    let user = null
+    if (token) {
+      const { data } = await supabase.auth.getUser(token)
+      user = data.user
+    }
+    if (!user) {
+      const { data } = await supabase.auth.getUser()
+      user = data.user
+    }
 
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: 'Unauthorized: No active user session found.' }, { status: 401 })
     }
 
     const body = await request.json()
@@ -31,7 +50,7 @@ export async function POST(request: Request) {
     }
 
     const payoutAmount = Number(creatorPayout)
-    const platformFee = Math.round(payoutAmount * 0.15 * 100) / 100 // 15% marketplace fee
+    const platformFee = Math.round(payoutAmount * 0.15 * 100) / 100
     const totalAmount = payoutAmount + platformFee
     const handshakePin = Math.floor(1000 + Math.random() * 9000).toString()
 
