@@ -2,109 +2,114 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowRight, ShieldCheck, Mail, Lock, User } from 'lucide-react'
+import { Shield, Loader2 } from 'lucide-react'
 
 export default function LoginPage() {
-  const [isSignUp, setIsSignUp] = useState(true)
+  const supabase = createClient()
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [username, setUsername] = useState('')
+  const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const getRedirectDestination = () => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('next') || '/dashboard/telemetry'
+  }
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    setMessage('')
-    const supabase = createClient()
+    setError(null)
+    setMessage(null)
 
     try {
       if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({
+        const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
-          options: {
-            data: { username: username.toLowerCase() }
-          }
         })
-        if (error) throw error
-        setMessage('Account created! Check your email to confirm registration.')
+        if (signUpError) throw signUpError
+
+        if (data.session) {
+          window.location.href = getRedirectDestination()
+          return
+        }
+
+        setMessage(
+          'Account created! Check your email to confirm, or disable "Confirm email" in Supabase Auth settings for instant local login.'
+        )
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-        window.location.href = '/dashboard'
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        })
+        if (signInError) throw signInError
+
+        window.location.href = getRedirectDestination()
       }
     } catch (err: any) {
-      setMessage(err.message || 'Authentication failed.')
+      setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-6">
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center space-x-1 font-mono text-2xl font-black">
-            <span className="text-emerald-400">PULL</span>
-            <span className="text-zinc-500">/</span>
-            <span>UP</span>
-          </div>
-          <p className="text-xs text-zinc-400">
-            {isSignUp ? 'Claim your handle & set up escrow bookings' : 'Log in to your creator dashboard'}
+    <main className="flex min-h-screen items-center justify-center bg-black px-4 text-white">
+      <div className="w-full max-w-md space-y-6 rounded-3xl border border-neutral-800 bg-neutral-950 p-8">
+        <div>
+          <span className="text-xs font-semibold uppercase tracking-widest text-emerald-400">
+            PULL UP Access
+          </span>
+          <h1 className="mt-1 text-2xl font-black tracking-tight">
+            {isSignUp ? 'Create Host Account' : 'Sign In to Dashboard'}
+          </h1>
+          <p className="mt-1 text-xs text-neutral-400">
+            Authenticate to book talent, fund escrow, and manage live telemetry.
           </p>
         </div>
 
         <form onSubmit={handleAuth} className="space-y-4">
-          {isSignUp && (
-            <div>
-              <label className="block text-xs uppercase font-medium text-zinc-400 mb-1">Handle</label>
-              <div className="relative">
-                <User className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
-                <input
-                  type="text"
-                  required
-                  placeholder="yourhandle"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-emerald-500 font-mono"
-                />
-              </div>
-            </div>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400">
+              Email
+            </label>
+            <input
+              type="email"
+              required
+              placeholder="host@pullup.app"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="mt-1.5 w-full rounded-xl border border-neutral-800 bg-black px-3.5 py-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400">
+              Password
+            </label>
+            <input
+              type="password"
+              required
+              minLength={6}
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="mt-1.5 w-full rounded-xl border border-neutral-800 bg-black px-3.5 py-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            />
+          </div>
+
+          {error && (
+            <p className="rounded-xl border border-rose-900 bg-rose-950/50 p-3 text-xs text-rose-400">
+              {error}
+            </p>
           )}
 
-          <div>
-            <label className="block text-xs uppercase font-medium text-zinc-400 mb-1">Email</label>
-            <div className="relative">
-              <Mail className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
-              <input
-                type="email"
-                required
-                placeholder="you@domain.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs uppercase font-medium text-zinc-400 mb-1">Password</label>
-            <div className="relative">
-              <Lock className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-          </div>
-
           {message && (
-            <p className="text-xs text-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 py-2 rounded-lg">
+            <p className="rounded-xl border border-emerald-900 bg-emerald-950/50 p-3 text-xs text-emerald-400">
               {message}
             </p>
           )}
@@ -112,23 +117,33 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center space-x-2 transition-all"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3 text-sm font-bold text-black transition hover:bg-emerald-400 disabled:opacity-50"
           >
-            <span>{loading ? 'Processing...' : isSignUp ? 'Claim Handle & Sign Up' : 'Log In'}</span>
-            <ArrowRight className="w-4 h-4" />
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <Shield className="h-4 w-4" />
+                <span>{isSignUp ? 'Create Account & Continue' : 'Sign In'}</span>
+              </>
+            )}
           </button>
         </form>
 
         <div className="text-center">
           <button
             type="button"
-            onClick={() => setIsSignUp(!isSignUp)}
-            className="text-xs text-zinc-400 hover:text-zinc-200 underline"
+            onClick={() => {
+              setIsSignUp(!isSignUp)
+              setError(null)
+              setMessage(null)
+            }}
+            className="text-xs text-neutral-400 hover:text-white"
           >
-            {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
+            {isSignUp ? 'Already have an account? Sign in' : "Don't have a test account? Sign up"}
           </button>
         </div>
       </div>
-    </div>
+    </main>
   )
 }
