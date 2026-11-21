@@ -44,7 +44,7 @@ export default function SignUpPage() {
     // If email confirmation is disabled in Supabase, session is active immediately
     if (data.session) {
       router.refresh()
-      router.push('/dashboard/telemetry')
+      router.push('/dashboard/profile')
     } else {
       setMessage('Check your email for a confirmation link to activate your account.')
       setLoading(false)

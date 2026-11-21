@@ -47,7 +47,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-black text-white flex flex-col items-center">
       {/* Top Bar */}
       <header className="w-full max-w-2xl px-6 py-6 flex items-center justify-between">
-        <Link href="/" className="text-lg font-extrabold tracking-tight">
+        <Link href="/dashboard/profile" className="text-lg font-extrabold tracking-tight">
           PULL UP
         </Link>
 
