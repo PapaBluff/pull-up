@@ -178,36 +178,45 @@ export default function HomePage() {
             PEOPLE NEAR YOU
           </h2>
 
-          <div className="space-y-4">
-            <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 flex items-center justify-between">
+          <div className="space-y-3">
+            <Link
+              href="/search?feed=available&when=now"
+              className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 flex items-center justify-between hover:border-neutral-600 transition"
+            >
               <div>
                 <div className="text-sm font-semibold text-white">Available now</div>
                 <div className="text-xs text-neutral-500 mt-0.5">
                   Ready to pull up in under 60 minutes
                 </div>
               </div>
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            </div>
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            </Link>
 
-            <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 flex items-center justify-between">
+            <Link
+              href="/search?feed=popular"
+              className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 flex items-center justify-between hover:border-neutral-600 transition"
+            >
               <div>
                 <div className="text-sm font-semibold text-white">Popular in your area</div>
                 <div className="text-xs text-neutral-500 mt-0.5">
                   Highest-rated local talent this week
                 </div>
               </div>
-              <span className="text-xs text-neutral-500">→</span>
-            </div>
+              <span className="text-xs text-neutral-400">→</span>
+            </Link>
 
-            <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 flex items-center justify-between">
+            <Link
+              href="/search?feed=recent"
+              className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 flex items-center justify-between hover:border-neutral-600 transition"
+            >
               <div>
                 <div className="text-sm font-semibold text-white">Recently booked</div>
                 <div className="text-xs text-neutral-500 mt-0.5">
                   Live appearances completed nearby
                 </div>
               </div>
-              <span className="text-xs text-neutral-500">→</span>
-            </div>
+              <span className="text-xs text-neutral-400">→</span>
+            </Link>
           </div>
         </section>
       </main>
