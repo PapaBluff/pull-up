@@ -116,7 +116,30 @@ export default async function PublicCreatorProfilePage({ params }: Props) {
               </Link>
 
               <Link
-                href={`/dashboard/book/${profile.id}?when=schedule`} className="block w-full rounded-xl border border-neutral-800 bg-neutral-950 py-4 text-center text-xs font-bold tracking-wider uppercase text-white hover:border-neutral-600 transition" > SCHEDULE APPEARANCE </Link> </div> </section> ) : ( <section className="py-8 text-center"> <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-6 space-y-3"> <p className="text-sm font-semibold text-white">Member Profile</p> <p className="text-xs text-neutral-400"> This user books talent on PULL UP. </p> <Link href="/search" className="inline-block mt-2 rounded-xl bg-white px-5 py-3 text-xs font-bold tracking-wider uppercase text-black hover:bg-neutral-200 transition" > BROWSE TALENT </Link> </div> </section> )} </main> </div> ) } ```  ### 2. Optional Quick Links to Connect Everything * **In `src/app/dashboard/profile/page.tsx`:** Once a user saves a `@username`, you can display a **"VIEW PUBLIC PROFILE →"** link pointing to `/u/${username}` right next to **YOUR PROFILE** at the top of the editor so creators can copy or preview their live shareable URL immediately.
-* **In `src/app/search/page.tsx`:** You can wrap each creator's avatar and name in `<Link : ? \`/dashboard/book/\${person.id}\`} \`/u/\${person.username}\` href="{person.username">` so clicking a person's name opens their profile card while clicking the **PULL UP** button jumps straight to checkout.
-
-Save **`src/app/u/[username]/page.tsx`**, claim a `@username` in `/dashboard/profile`, and test visiting `
+                href={`/dashboard/book/${profile.id}?when=schedule`}
+                className="block w-full rounded-xl border border-neutral-800 bg-neutral-950 py-4 text-center text-xs font-bold tracking-wider uppercase text-white hover:border-neutral-600 transition"
+              >
+                SCHEDULE APPEARANCE
+              </Link>
+            </div>
+          </section>
+        ) : (
+          <section className="py-8 text-center">
+            <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-6 space-y-3">
+              <p className="text-sm font-semibold text-white">Member Profile</p>
+              <p className="text-xs text-neutral-400">
+                This user books talent on PULL UP.
+              </p>
+              <Link
+                href="/search"
+                className="inline-block mt-2 rounded-xl bg-white px-5 py-3 text-xs font-bold tracking-wider uppercase text-black hover:bg-neutral-200 transition"
+              >
+                BROWSE TALENT
+              </Link>
+            </div>
+          </section>
+        )}
+      </main>
+    </div>
+  )
+}
