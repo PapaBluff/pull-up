@@ -6,6 +6,11 @@ type Props = {
   params: Promise<{ username: string }>
 }
 
+type ProfileLink = {
+  label: string
+  url: string
+}
+
 export default async function PublicCreatorProfilePage({ params }: Props) {
   const { username } = await params
   const cleanUsername = decodeURIComponent(username).toLowerCase().replace(/^@+/, '')
@@ -14,7 +19,9 @@ export default async function PublicCreatorProfilePage({ params }: Props) {
 
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('id, username, full_name, avatar_url, role, hourly_rate, stripe_account_id, created_at')
+    .select(
+      'id, username, full_name, avatar_url, bio, links, media_urls, role, hourly_rate, stripe_account_id'
+    )
     .eq('username', cleanUsername)
     .single()
 
@@ -26,6 +33,8 @@ export default async function PublicCreatorProfilePage({ params }: Props) {
   const initial = displayName.charAt(0).toUpperCase()
   const isCreator = profile.role === 'creator'
   const isVerified = Boolean(profile.stripe_account_id)
+  const links: ProfileLink[] = Array.isArray(profile.links) ? profile.links : []
+  const mediaUrls: string[] = Array.isArray(profile.media_urls) ? profile.media_urls : []
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center">
@@ -44,7 +53,7 @@ export default async function PublicCreatorProfilePage({ params }: Props) {
 
       <main className="w-full max-w-xl px-6 pb-20 flex flex-col">
         {/* Identity Header */}
-        <section className="pt-8 pb-8 flex flex-col items-center text-center">
+        <section className="pt-8 pb-6 flex flex-col items-center text-center">
           {profile.avatar_url ? (
             <img
               src={profile.avatar_url}
@@ -72,13 +81,36 @@ export default async function PublicCreatorProfilePage({ params }: Props) {
           {profile.username && (
             <p className="text-sm text-neutral-400 mt-1">@{profile.username}</p>
           )}
+
+          {profile.bio && (
+            <p className="text-sm text-neutral-300 mt-4 max-w-md leading-relaxed">
+              {profile.bio}
+            </p>
+          )}
+
+          {/* Clickable Links */}
+          {links.length > 0 && (
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-5">
+              {links.map((link, idx) => (
+                <a
+                  key={`${link.url}-${idx}`}
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-full border border-neutral-800 bg-neutral-950 px-4 py-1.5 text-xs font-semibold text-white hover:border-white transition"
+                >
+                  {link.label} ↗
+                </a>
+              ))}
+            </div>
+          )}
         </section>
 
         <hr className="border-neutral-800" />
 
-        {/* Rate & Dispatch Card */}
-        {isCreator ? (
-          <section className="py-8 space-y-6">
+        {/* Booking Section for Talent */}
+        {isCreator && (
+          <section className="py-6 space-y-5">
             <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-6 flex items-center justify-between">
               <div>
                 <div className="text-xs font-bold tracking-widest uppercase text-neutral-400">
@@ -106,7 +138,6 @@ export default async function PublicCreatorProfilePage({ params }: Props) {
               </div>
             </div>
 
-            {/* Direct Booking Actions */}
             <div className="space-y-3">
               <Link
                 href={`/dashboard/book/${profile.id}?when=now`}
@@ -123,19 +154,42 @@ export default async function PublicCreatorProfilePage({ params }: Props) {
               </Link>
             </div>
           </section>
-        ) : (
-          <section className="py-8 text-center">
-            <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-6 space-y-3">
-              <p className="text-sm font-semibold text-white">Member Profile</p>
-              <p className="text-xs text-neutral-400">
-                This user books talent on PULL UP.
-              </p>
-              <Link
-                href="/search"
-                className="inline-block mt-2 rounded-xl bg-white px-5 py-3 text-xs font-bold tracking-wider uppercase text-black hover:bg-neutral-200 transition"
-              >
-                BROWSE TALENT
-              </Link>
+        )}
+
+        {/* Uploaded Photos & Content */}
+        {mediaUrls.length > 0 && (
+          <section className="py-6 space-y-4">
+            <h2 className="text-xs font-bold tracking-widest uppercase text-neutral-400">
+              FEATURED CONTENT
+            </h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {mediaUrls.map((url) => {
+                const isVideo = /\.(mp4|mov|webm)(\?|$)/i.test(url)
+                return (
+                  <a
+                    key={url}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="aspect-square rounded-xl overflow-hidden border border-neutral-800 bg-neutral-950 block"
+                  >
+                    {isVideo ? (
+                      <video
+                        src={url}
+                        className="h-full w-full object-cover"
+                        controls
+                        playsInline
+                      />
+                    ) : (
+                      <img
+                        src={url}
+                        alt={displayName}
+                        className="h-full w-full object-cover hover:scale-105 transition duration-300"
+                      />
+                    )}
+                  </a>
+                )
+              })}
             </div>
           </section>
         )}
