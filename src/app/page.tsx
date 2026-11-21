@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
 const CATEGORIES = [
+  { id: 'all', label: 'All' },
   { id: 'home-help', label: 'Home Help' },
   { id: 'social', label: 'Social' },
   { id: 'creators', label: 'Creators' },
@@ -13,58 +14,108 @@ const CATEGORIES = [
   { id: 'experiences', label: 'Experiences' },
 ]
 
+type FeaturedCreator = {
+  id: string
+  username: string | null
+  full_name: string | null
+  avatar_url: string | null
+  hourly_rate: number | null
+  stripe_account_id: string | null
+}
+
 export default function HomePage() {
   const router = useRouter()
   const supabase = createClient()
 
-  const [user, setUser] = useState<any>(null)
-  const [query, setQuery] = useState('')
   const [urgency, setUrgency] = useState<'NOW' | 'SCHEDULE'>('NOW')
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('all')
+
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [currentUsername, setCurrentUsername] = useState<string | null>(null)
+  const [featured, setFeatured] = useState<FeaturedCreator[]>([])
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user ?? null)
-    })
+    async function loadSessionAndFeatured() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (user) {
+        setIsLoggedIn(true)
+        const { data: myProfile } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        setCurrentUsername(
+          myProfile?.username || user.user_metadata?.username || null
+        )
+      } else {
+        setIsLoggedIn(false)
+        setCurrentUsername(null)
+      }
+
+      const { data: creators } = await supabase
+        .from('profiles')
+        .select('id, username, full_name, avatar_url, hourly_rate, stripe_account_id')
+        .eq('role', 'creator')
+        .order('created_at', { ascending: false })
+        .limit(4)
+
+      if (creators) {
+        setFeatured(creators)
+      }
+    }
+
+    loadSessionAndFeatured()
   }, [supabase])
 
-  async function handleSignOut() {
-    await supabase.auth.signOut()
-    setUser(null)
-    router.refresh()
-  }
-
-  function handleFindSomeone(e: React.FormEvent) {
+  function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault()
     const params = new URLSearchParams()
     if (query.trim()) params.set('q', query.trim())
     params.set('when', urgency.toLowerCase())
-    if (selectedCategory) params.set('category', selectedCategory)
+    if (selectedCategory && selectedCategory !== 'all') {
+      params.set('category', selectedCategory)
+    }
+    router.push(`/search?${params.toString()}`)
+  }
+
+  function handleCategoryClick(categoryId: string) {
+    setSelectedCategory(categoryId)
+    const params = new URLSearchParams()
+    if (query.trim()) params.set('q', query.trim())
+    params.set('when', urgency.toLowerCase())
+    if (categoryId !== 'all') params.set('category', categoryId)
     router.push(`/search?${params.toString()}`)
   }
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center">
-      {/* Top Bar */}
+      {/* Top Navigation Bar */}
       <header className="w-full max-w-2xl px-6 py-6 flex items-center justify-between">
-        <Link href="/dashboard/profile" className="text-lg font-extrabold tracking-tight">
+        <Link href="/" className="text-lg font-extrabold tracking-tight">
           PULL UP
         </Link>
 
-        {user ? (
+        {isLoggedIn ? (
           <div className="flex items-center gap-4">
+            {currentUsername && (
+              <Link
+                href={`/u/${currentUsername}`}
+                className="text-xs font-semibold tracking-wider uppercase text-neutral-300 hover:text-white transition"
+              >
+                MY PROFILE
+              </Link>
+            )}
             <Link
-              href="/dashboard/telemetry"
-              className="text-xs font-semibold tracking-wider uppercase text-neutral-300 hover:text-white transition"
+              href="/dashboard/profile"
+              className="rounded-full border border-neutral-700 px-3.5 py-1.5 text-xs font-bold tracking-wider uppercase text-white hover:border-white transition"
             >
-              DASHBOARD
+              EDIT PROFILE
             </Link>
-            <button
-              onClick={handleSignOut}
-              className="text-xs font-semibold tracking-wider uppercase text-neutral-400 hover:text-white transition"
-            >
-              SIGN OUT
-            </button>
           </div>
         ) : (
           <div className="flex items-center gap-4">
@@ -84,83 +135,66 @@ export default function HomePage() {
         )}
       </header>
 
-      {/* Main Content Container */}
       <main className="w-full max-w-xl px-6 pb-20 flex flex-col">
-        {/* Hero Dispatch Prompt */}
-        <section className="pt-8 pb-10 text-center">
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight uppercase mb-6">
-            WHO DO YOU NEED?
-          </h1>
+        {/* Hero & Dispatch Controls */}
+        <section className="pt-8 pb-8 space-y-6">
+          <div className="space-y-2">
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight uppercase leading-none">
+              WHO IS PULLING UP?
+            </h1>
+            <p className="text-sm text-neutral-400">
+              Book real people and creators for in-person appearances right now or on schedule.
+            </p>
+          </div>
 
-          <form onSubmit={handleFindSomeone} className="space-y-4">
+          {/* NOW / SCHEDULE Switcher */}
+          <div className="grid grid-cols-2 rounded-xl border border-neutral-800 bg-neutral-950 p-1">
+            {(['NOW', 'SCHEDULE'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setUrgency(mode)}
+                className={`py-2.5 rounded-lg text-xs font-bold tracking-wider uppercase transition ${
+                  urgency === mode
+                    ? 'bg-white text-black'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+
+          {/* Search Form */}
+          <form onSubmit={handleSearchSubmit} className="space-y-3">
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Tell us what you're looking for..."
-              className="w-full rounded-xl bg-neutral-900 border border-neutral-800 px-4 py-4 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-white transition"
+              placeholder="Search by name, @handle, or vibe..."
+              className="w-full rounded-xl bg-neutral-900 border border-neutral-800 px-4 py-3.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-white transition"
             />
-
             <button
               type="submit"
-              className="w-full sm:w-auto sm:min-w-[220px] rounded-xl bg-white px-6 py-3.5 text-xs font-bold tracking-wider uppercase text-black hover:bg-neutral-200 transition"
+              className="w-full rounded-xl bg-white py-4 text-xs font-bold tracking-wider uppercase text-black hover:bg-neutral-200 transition"
             >
               FIND SOMEONE
             </button>
           </form>
-        </section>
 
-        <hr className="border-neutral-800" />
-
-        {/* Urgency Selector */}
-        <section className="py-8">
-          <h2 className="text-xs font-bold tracking-widest uppercase text-neutral-400 mb-4">
-            HOW SOON DO YOU NEED THEM?
-          </h2>
-
-          <div className="grid grid-cols-2 gap-3">
-            {(['NOW', 'SCHEDULE'] as const).map((option) => {
-              const active = urgency === option
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setUrgency(option)}
-                  className={`rounded-xl py-3.5 text-xs font-bold tracking-wider uppercase border transition ${
-                    active
-                      ? 'bg-white text-black border-white'
-                      : 'bg-neutral-950 text-neutral-300 border-neutral-800 hover:border-neutral-600'
-                  }`}
-                >
-                  {option}
-                </button>
-              )
-            })}
-          </div>
-        </section>
-
-        <hr className="border-neutral-800" />
-
-        {/* Explore People Categories */}
-        <section className="py-8">
-          <h2 className="text-xs font-bold tracking-widest uppercase text-neutral-400 mb-4">
-            EXPLORE PEOPLE
-          </h2>
-
-          <div className="grid grid-cols-2 gap-3">
+          {/* Category Pills */}
+          <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
             {CATEGORIES.map((cat) => {
               const active = selectedCategory === cat.id
               return (
                 <button
                   key={cat.id}
                   type="button"
-                  onClick={() =>
-                    setSelectedCategory(active ? null : cat.id)
-                  }
-                  className={`rounded-xl px-4 py-3.5 text-left text-sm font-medium border transition ${
+                  onClick={() => handleCategoryClick(cat.id)}
+                  className={`shrink-0 rounded-full px-4 py-2 text-xs font-semibold border transition ${
                     active
                       ? 'bg-white text-black border-white'
-                      : 'bg-neutral-950 text-white border-neutral-800 hover:border-neutral-600'
+                      : 'bg-neutral-950 text-neutral-300 border-neutral-800 hover:border-neutral-600'
                   }`}
                 >
                   {cat.label}
@@ -172,53 +206,108 @@ export default function HomePage() {
 
         <hr className="border-neutral-800" />
 
-        {/* People Near You Discovery Feeds */}
-        <section className="py-8 space-y-6">
-          <h2 className="text-xs font-bold tracking-widest uppercase text-neutral-400">
-            PEOPLE NEAR YOU
-          </h2>
+        {/* Quick Feeds */}
+        <section className="py-6 grid grid-cols-3 gap-2.5">
+          <Link
+            href={`/search?when=${urgency.toLowerCase()}&feed=available`}
+            className="rounded-xl border border-neutral-800 bg-neutral-950 p-3.5 text-center hover:border-neutral-600 transition"
+          >
+            <div className="text-[11px] font-bold tracking-wider uppercase text-white">
+              AVAILABLE NOW
+            </div>
+          </Link>
 
-          <div className="space-y-3">
-            <Link
-              href="/search?feed=available&when=now"
-              className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 flex items-center justify-between hover:border-neutral-600 transition"
-            >
-              <div>
-                <div className="text-sm font-semibold text-white">Available now</div>
-                <div className="text-xs text-neutral-500 mt-0.5">
-                  Ready to pull up in under 60 minutes
-                </div>
-              </div>
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-            </Link>
+          <Link
+            href={`/search?when=${urgency.toLowerCase()}&feed=popular`}
+            className="rounded-xl border border-neutral-800 bg-neutral-950 p-3.5 text-center hover:border-neutral-600 transition"
+          >
+            <div className="text-[11px] font-bold tracking-wider uppercase text-white">
+              POPULAR
+            </div>
+          </Link>
 
-            <Link
-              href="/search?feed=popular"
-              className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 flex items-center justify-between hover:border-neutral-600 transition"
-            >
-              <div>
-                <div className="text-sm font-semibold text-white">Popular in your area</div>
-                <div className="text-xs text-neutral-500 mt-0.5">
-                  Highest-rated local talent this week
-                </div>
-              </div>
-              <span className="text-xs text-neutral-400">→</span>
-            </Link>
-
-            <Link
-              href="/search?feed=recent"
-              className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 flex items-center justify-between hover:border-neutral-600 transition"
-            >
-              <div>
-                <div className="text-sm font-semibold text-white">Recently booked</div>
-                <div className="text-xs text-neutral-500 mt-0.5">
-                  Live appearances completed nearby
-                </div>
-              </div>
-              <span className="text-xs text-neutral-400">→</span>
-            </Link>
-          </div>
+          <Link
+            href={`/search?when=${urgency.toLowerCase()}&feed=recent`}
+            className="rounded-xl border border-neutral-800 bg-neutral-950 p-3.5 text-center hover:border-neutral-600 transition"
+          >
+            <div className="text-[11px] font-bold tracking-wider uppercase text-white">
+              NEW TALENT
+            </div>
+          </Link>
         </section>
+
+        {/* Featured Creators Preview */}
+        {featured.length > 0 && (
+          <>
+            <hr className="border-neutral-800" />
+            <section className="py-6 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-bold tracking-widest uppercase text-neutral-400">
+                  ON DISPATCH
+                </h2>
+                <Link
+                  href="/search"
+                  className="text-xs font-semibold text-neutral-400 hover:text-white transition"
+                >
+                  VIEW ALL →
+                </Link>
+              </div>
+
+              <div className="space-y-2.5">
+                {featured.map((person) => {
+                  const displayName = person.full_name || person.username || 'PULL UP Talent'
+                  const initial = displayName.charAt(0).toUpperCase()
+                  const profileHref = person.username
+                    ? `/u/${person.username}`
+                    : `/dashboard/book/${person.id}?when=${urgency.toLowerCase()}`
+
+                  return (
+                    <div
+                      key={person.id}
+                      className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 flex items-center justify-between gap-4"
+                    >
+                      <Link href={profileHref} className="flex items-center gap-3 min-w-0 flex-1">
+                        {person.avatar_url ? (
+                          <img
+                            src={person.avatar_url}
+                            alt={displayName}
+                            className="h-10 w-10 rounded-full object-cover border border-neutral-800 shrink-0"
+                          />
+                        ) : (
+                          <div className="h-10 w-10 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                            {initial}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-white truncate">
+                              {displayName}
+                            </span>
+                            {person.stripe_account_id && (
+                              <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" />
+                            )}
+                          </div>
+                          {person.username && (
+                            <p className="text-xs text-neutral-400 truncate">
+                              @{person.username}
+                            </p>
+                          )}
+                        </div>
+                      </Link>
+
+                      <Link
+                        href={`/dashboard/book/${person.id}?when=${urgency.toLowerCase()}`}
+                        className="shrink-0 rounded-lg bg-white px-3.5 py-2 text-[11px] font-bold tracking-wider uppercase text-black hover:bg-neutral-200 transition"
+                      >
+                        PULL UP
+                      </Link>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          </>
+        )}
       </main>
     </div>
   )
