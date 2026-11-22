@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 type ProfileLink = {
   label: string
   url: string
+  verified: boolean
 }
 
 function normalizeAndValidateUrl(rawInput: string): string | null {
@@ -18,7 +19,6 @@ function normalizeAndValidateUrl(rawInput: string): string | null {
 
   try {
     const parsed = new URL(withProtocol)
-    // Must be http/https and contain a valid domain with a dot (e.g., instagram.com)
     if (
       (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
       !parsed.hostname.includes('.') ||
@@ -46,6 +46,8 @@ export default function ProfileEditorPage() {
   const [editingIdentity, setEditingIdentity] = useState(false)
 
   const [avatarUrl, setAvatarUrl] = useState('')
+  const [avatarLightboxOpen, setAvatarLightboxOpen] = useState(false)
+
   const [bio, setBio] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [hourlyRate, setHourlyRate] = useState('')
@@ -64,7 +66,6 @@ export default function ProfileEditorPage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  // Required media count based on account role: 5 for talent/host-creator, 3 for bookers
   const requiredMediaCount = role === 'creator' ? 5 : 3
   const hasAvatar = Boolean(avatarUrl.trim())
   const hasEnoughMedia = mediaUrls.length >= requiredMediaCount
@@ -116,9 +117,17 @@ export default function ProfileEditorPage() {
           : ''
       )
       setStripeAccountId(profile?.stripe_account_id ?? null)
-      setLinks(Array.isArray(profile?.links) ? profile.links : [])
-      setMediaUrls(Array.isArray(profile?.media_urls) ? profile.media_urls : [])
 
+      const loadedLinks = Array.isArray(profile?.links)
+        ? profile.links.map((item: Partial<ProfileLink>) => ({
+            label: item.label || '',
+            url: item.url || '',
+            verified: Boolean(item.verified),
+          }))
+        : []
+      setLinks(loadedLinks)
+
+      setMediaUrls(Array.isArray(profile?.media_urls) ? profile.media_urls : [])
       setLoading(false)
     }
 
@@ -208,12 +217,22 @@ export default function ProfileEditorPage() {
 
     const parsedHost = new URL(validUrl).hostname.replace(/^www\./, '')
 
+    // Starts unverified; hidden publicly until verified
     setLinks((prev) => [
       ...prev,
-      { label: label || parsedHost, url: validUrl },
+      { label: label || parsedHost, url: validUrl, verified: false },
     ])
     setNewLinkLabel('')
     setNewLinkUrl('')
+  }
+
+  function handleVerifyLink(index: number) {
+    const target = links[index]
+    if (!target) return
+    window.open(target.url, '_blank', 'noopener,noreferrer')
+    setLinks((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, verified: true } : item))
+    )
   }
 
   function handleRemoveLink(index: number) {
@@ -230,7 +249,6 @@ export default function ProfileEditorPage() {
 
     setMessage(null)
 
-    // 1. Enforce profile photo requirement
     if (!hasAvatar) {
       setMessage({
         type: 'error',
@@ -239,7 +257,6 @@ export default function ProfileEditorPage() {
       return
     }
 
-    // 2. Enforce minimum media count (5 for talent/creators, 3 for bookers)
     if (!hasEnoughMedia) {
       const remaining = requiredMediaCount - mediaUrls.length
       setMessage({
@@ -264,7 +281,6 @@ export default function ProfileEditorPage() {
       return
     }
 
-    // 3. Validate all saved links before writing
     const validatedLinks: ProfileLink[] = []
     for (const item of links) {
       const valid = normalizeAndValidateUrl(item.url)
@@ -275,13 +291,16 @@ export default function ProfileEditorPage() {
         })
         return
       }
-      validatedLinks.push({ label: item.label.trim() || valid, url: valid })
+      validatedLinks.push({
+        label: item.label.trim() || valid,
+        url: valid,
+        verified: Boolean(item.verified),
+      })
     }
 
     setSaving(true)
     const supabase = createClient()
 
-    // 4. Enforce strict 1-of-1 unique username check
     const { data: handleConflict } = await supabase
       .from('profiles')
       .select('id')
@@ -366,6 +385,29 @@ export default function ProfileEditorPage() {
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center">
+      {/* Lightbox Modal for Viewing Profile Photo Larger */}
+      {avatarLightboxOpen && avatarUrl && (
+        <div
+          onClick={() => setAvatarLightboxOpen(false)}
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-6 cursor-zoom-out"
+        >
+          <div className="relative max-w-lg w-full">
+            <img
+              src={avatarUrl}
+              alt={fullName || username}
+              className="w-full max-h-[80vh] object-contain rounded-2xl border border-neutral-800"
+            />
+            <button
+              type="button"
+              onClick={() => setAvatarLightboxOpen(false)}
+              className="mt-4 w-full rounded-xl border border-neutral-700 bg-neutral-950 py-3 text-xs font-bold uppercase tracking-wider text-white"
+            >
+              CLOSE PREVIEW
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Bar */}
       <header className="w-full max-w-2xl px-6 py-6 flex items-center justify-between">
         <Link href="/" className="text-lg font-extrabold tracking-tight">
@@ -391,14 +433,19 @@ export default function ProfileEditorPage() {
       </header>
 
       <main className="w-full max-w-xl px-6 pb-20 flex flex-col">
-        {/* Identity & Required Avatar Header */}
+        {/* Identity & Clickable Avatar Header */}
         <section className="pt-4 pb-6 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <button
               type="button"
-              onClick={() => avatarInputRef.current?.click()}
+              onClick={() =>
+                avatarUrl
+                  ? setAvatarLightboxOpen(true)
+                  : avatarInputRef.current?.click()
+              }
+              title={avatarUrl ? 'Click to view larger' : 'Upload profile photo'}
               className={`relative group h-16 w-16 rounded-full overflow-hidden border ${
-                hasAvatar ? 'border-neutral-700' : 'border-amber-500'
+                hasAvatar ? 'border-neutral-700 cursor-zoom-in' : 'border-amber-500'
               } bg-neutral-900 flex items-center justify-center shrink-0`}
             >
               {avatarUrl ? (
@@ -411,7 +458,7 @@ export default function ProfileEditorPage() {
                 <span className="text-lg font-extrabold text-white">{displayInitial}</span>
               )}
               <span className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] font-bold uppercase tracking-wider transition">
-                {uploadingAvatar ? '...' : 'UPLOAD'}
+                {uploadingAvatar ? '...' : avatarUrl ? 'VIEW' : 'UPLOAD'}
               </span>
             </button>
 
@@ -543,11 +590,16 @@ export default function ProfileEditorPage() {
             </div>
           </div>
 
-          {/* Verifiable & Clickable URLs / Social Links Section */}
+          {/* Verifiable Links & Socials (Hidden publicly until verified) */}
           <div className="space-y-3">
-            <label className="block text-xs font-bold tracking-widest uppercase text-neutral-400">
-              VERIFIABLE LINKS & SOCIALS
-            </label>
+            <div>
+              <label className="block text-xs font-bold tracking-widest uppercase text-neutral-400">
+                LINKS & SOCIALS
+              </label>
+              <p className="text-[11px] text-neutral-500 mt-0.5">
+                Links stay hidden from your public profile until you verify them.
+              </p>
+            </div>
 
             {links.length > 0 && (
               <div className="space-y-2">
@@ -556,28 +608,34 @@ export default function ProfileEditorPage() {
                     key={`${item.url}-${idx}`}
                     className="rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 flex items-center justify-between gap-3"
                   >
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="min-w-0 flex-1 group"
-                    >
-                      <div className="text-xs font-bold text-white group-hover:underline truncate">
-                        {item.label} ↗
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white truncate">
+                          {item.label}
+                        </span>
+                        {item.verified ? (
+                          <span className="rounded-full bg-emerald-950 border border-emerald-800 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-300">
+                            VERIFIED
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-950 border border-amber-800 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-300">
+                            HIDDEN · UNVERIFIED
+                          </span>
+                        )}
                       </div>
-                      <div className="text-[11px] text-neutral-400 truncate">
+                      <div className="text-[11px] text-neutral-400 truncate mt-0.5">
                         {item.url}
                       </div>
-                    </a>
+                    </div>
+
                     <div className="flex items-center gap-2 shrink-0">
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded-lg border border-neutral-700 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-neutral-200 hover:border-white hover:text-white transition"
+                      <button
+                        type="button"
+                        onClick={() => handleVerifyLink(idx)}
+                        className="rounded-lg border border-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-white hover:text-black transition"
                       >
-                        VERIFY ↗
-                      </a>
+                        {item.verified ? 'OPEN ↗' : 'VERIFY LINK ↗'}
+                      </button>
                       <button
                         type="button"
                         onClick={() => handleRemoveLink(idx)}

@@ -41,6 +41,8 @@ export default function HomePage() {
 
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [currentUsername, setCurrentUsername] = useState<string | null>(null)
+  const [currentDisplayName, setCurrentDisplayName] = useState<string | null>(null)
+  const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null)
   const [featured, setFeatured] = useState<FeaturedCreator[]>([])
 
   useEffect(() => {
@@ -54,16 +56,22 @@ export default function HomePage() {
         setIsLoggedIn(true)
         const { data: myProfile } = await supabase
           .from('profiles')
-          .select('username')
+          .select('username, full_name, avatar_url')
           .eq('id', user.id)
           .maybeSingle()
 
         setCurrentUsername(
           myProfile?.username || user.user_metadata?.username || null
         )
+        setCurrentDisplayName(
+          myProfile?.full_name || user.user_metadata?.full_name || user.email || null
+        )
+        setCurrentAvatarUrl(myProfile?.avatar_url || null)
       } else {
         setIsLoggedIn(false)
         setCurrentUsername(null)
+        setCurrentDisplayName(null)
+        setCurrentAvatarUrl(null)
       }
 
       const { data: creators } = await supabase
@@ -86,6 +94,8 @@ export default function HomePage() {
     await supabase.auth.signOut()
     setIsLoggedIn(false)
     setCurrentUsername(null)
+    setCurrentDisplayName(null)
+    setCurrentAvatarUrl(null)
     router.refresh()
   }
 
@@ -114,28 +124,60 @@ export default function HomePage() {
     router.push(`/search?${buildSearchParams(categoryId)}`)
   }
 
-  function buildBookHref(creatorId: string) {
+  function buildPullUpHref(person: FeaturedCreator) {
     const params = new URLSearchParams()
+    params.set('book', '1')
     params.set('when', urgency.toLowerCase())
     if (urgency === 'SCHEDULE') {
       if (scheduledDate) params.set('date', scheduledDate)
       if (scheduledTime) params.set('time', scheduledTime)
     }
-    return `/dashboard/book/${creatorId}?${params.toString()}`
+    if (person.username) {
+      return `/u/${person.username}?${params.toString()}`
+    }
+    const searchFallback = new URLSearchParams()
+    if (person.full_name) searchFallback.set('q', person.full_name)
+    searchFallback.set('when', urgency.toLowerCase())
+    return `/search?${searchFallback.toString()}`
   }
 
   const todayMin = new Date().toISOString().split('T')[0]
+  const signedInLabel = currentUsername
+    ? `@${currentUsername}`
+    : currentDisplayName || 'SIGNED IN'
+  const signedInInitial = (currentDisplayName || currentUsername || 'U')
+    .charAt(0)
+    .toUpperCase()
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center">
       {/* Top Navigation Bar */}
-      <header className="w-full max-w-2xl px-6 py-6 flex items-center justify-between gap-4">
-        <Link href="/" className="text-lg font-extrabold tracking-tight">
+      <header className="w-full max-w-2xl px-6 py-6 flex items-center justify-between gap-3">
+        <Link href="/" className="text-lg font-extrabold tracking-tight shrink-0">
           PULL UP
         </Link>
 
         {isLoggedIn ? (
-          <div className="flex items-center gap-3 sm:gap-4">
+          <div className="flex items-center gap-2.5 sm:gap-3.5 flex-wrap justify-end">
+            {/* Signed-In User Indicator */}
+            <Link
+              href={currentUsername ? `/u/${currentUsername}` : '/dashboard/profile'}
+              className="inline-flex items-center gap-2 rounded-full bg-neutral-900 border border-neutral-800 px-3 py-1 text-[11px] font-bold text-white hover:border-neutral-600 transition"
+            >
+              {currentAvatarUrl ? (
+                <img
+                  src={currentAvatarUrl}
+                  alt={signedInLabel}
+                  className="h-4 w-4 rounded-full object-cover"
+                />
+              ) : (
+                <span className="h-4 w-4 rounded-full bg-emerald-500 text-black flex items-center justify-center text-[9px] font-extrabold">
+                  {signedInInitial}
+                </span>
+              )}
+              <span className="max-w-[110px] truncate">{signedInLabel}</span>
+            </Link>
+
             {currentUsername && (
               <Link
                 href={`/u/${currentUsername}`}
@@ -144,12 +186,14 @@ export default function HomePage() {
                 MY PROFILE
               </Link>
             )}
+
             <Link
               href="/dashboard/profile"
-              className="rounded-full border border-neutral-700 px-3.5 py-1.5 text-xs font-bold tracking-wider uppercase text-white hover:border-white transition"
+              className="rounded-full border border-neutral-700 px-3 py-1.5 text-xs font-bold tracking-wider uppercase text-white hover:border-white transition"
             >
               EDIT PROFILE
             </Link>
+
             <button
               type="button"
               onClick={handleSignOut}
@@ -336,7 +380,7 @@ export default function HomePage() {
                   const initial = displayName.charAt(0).toUpperCase()
                   const profileHref = person.username
                     ? `/u/${person.username}`
-                    : buildBookHref(person.id)
+                    : buildPullUpHref(person)
 
                   return (
                     <div
@@ -373,7 +417,7 @@ export default function HomePage() {
                       </Link>
 
                       <Link
-                        href={buildBookHref(person.id)}
+                        href={buildPullUpHref(person)}
                         className="shrink-0 rounded-lg bg-white px-3.5 py-2 text-[11px] font-bold tracking-wider uppercase text-black hover:bg-neutral-200 transition"
                       >
                         PULL UP
