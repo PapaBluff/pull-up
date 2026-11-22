@@ -23,11 +23,19 @@ type FeaturedCreator = {
   stripe_account_id: string | null
 }
 
+function getDefaultDate() {
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  return tomorrow.toISOString().split('T')[0]
+}
+
 export default function HomePage() {
   const router = useRouter()
-  const supabase = createClient()
 
   const [urgency, setUrgency] = useState<'NOW' | 'SCHEDULE'>('NOW')
+  const [scheduledDate, setScheduledDate] = useState<string>(getDefaultDate)
+  const [scheduledTime, setScheduledTime] = useState<string>('19:00')
+
   const [query, setQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
 
@@ -37,6 +45,7 @@ export default function HomePage() {
 
   useEffect(() => {
     async function loadSessionAndFeatured() {
+      const supabase = createClient()
       const {
         data: { user },
       } = await supabase.auth.getUser()
@@ -70,38 +79,63 @@ export default function HomePage() {
     }
 
     loadSessionAndFeatured()
-  }, [supabase])
+  }, [])
 
-  function handleSearchSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSignOut() {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    setIsLoggedIn(false)
+    setCurrentUsername(null)
+    router.refresh()
+  }
+
+  function buildSearchParams(overrideCategory?: string) {
     const params = new URLSearchParams()
     if (query.trim()) params.set('q', query.trim())
     params.set('when', urgency.toLowerCase())
-    if (selectedCategory && selectedCategory !== 'all') {
-      params.set('category', selectedCategory)
+    if (urgency === 'SCHEDULE') {
+      if (scheduledDate) params.set('date', scheduledDate)
+      if (scheduledTime) params.set('time', scheduledTime)
     }
-    router.push(`/search?${params.toString()}`)
+    const cat = overrideCategory ?? selectedCategory
+    if (cat && cat !== 'all') {
+      params.set('category', cat)
+    }
+    return params.toString()
+  }
+
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    router.push(`/search?${buildSearchParams()}`)
   }
 
   function handleCategoryClick(categoryId: string) {
     setSelectedCategory(categoryId)
-    const params = new URLSearchParams()
-    if (query.trim()) params.set('q', query.trim())
-    params.set('when', urgency.toLowerCase())
-    if (categoryId !== 'all') params.set('category', categoryId)
-    router.push(`/search?${params.toString()}`)
+    router.push(`/search?${buildSearchParams(categoryId)}`)
   }
+
+  function buildBookHref(creatorId: string) {
+    const params = new URLSearchParams()
+    params.set('when', urgency.toLowerCase())
+    if (urgency === 'SCHEDULE') {
+      if (scheduledDate) params.set('date', scheduledDate)
+      if (scheduledTime) params.set('time', scheduledTime)
+    }
+    return `/dashboard/book/${creatorId}?${params.toString()}`
+  }
+
+  const todayMin = new Date().toISOString().split('T')[0]
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center">
       {/* Top Navigation Bar */}
-      <header className="w-full max-w-2xl px-6 py-6 flex items-center justify-between">
+      <header className="w-full max-w-2xl px-6 py-6 flex items-center justify-between gap-4">
         <Link href="/" className="text-lg font-extrabold tracking-tight">
           PULL UP
         </Link>
 
         {isLoggedIn ? (
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
             {currentUsername && (
               <Link
                 href={`/u/${currentUsername}`}
@@ -116,6 +150,13 @@ export default function HomePage() {
             >
               EDIT PROFILE
             </Link>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="text-xs font-semibold tracking-wider uppercase text-neutral-400 hover:text-red-400 transition"
+            >
+              LOG OUT
+            </button>
           </div>
         ) : (
           <div className="flex items-center gap-4">
@@ -165,6 +206,40 @@ export default function HomePage() {
             ))}
           </div>
 
+          {/* Interactive Calendar & Time Picker when SCHEDULE is selected */}
+          {urgency === 'SCHEDULE' && (
+            <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
+              <div className="text-[11px] font-bold tracking-widest uppercase text-neutral-400">
+                SELECT APPEARANCE DATE & TIME
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-1">
+                    DATE
+                  </label>
+                  <input
+                    type="date"
+                    min={todayMin}
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white [color-scheme:dark]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-1">
+                    TIME
+                  </label>
+                  <input
+                    type="time"
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                    className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white [color-scheme:dark]"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Search Form */}
           <form onSubmit={handleSearchSubmit} className="space-y-3">
             <input
@@ -178,7 +253,9 @@ export default function HomePage() {
               type="submit"
               className="w-full rounded-xl bg-white py-4 text-xs font-bold tracking-wider uppercase text-black hover:bg-neutral-200 transition"
             >
-              FIND SOMEONE
+              {urgency === 'SCHEDULE'
+                ? `FIND TALENT FOR ${scheduledDate}`
+                : 'FIND SOMEONE'}
             </button>
           </form>
 
@@ -209,7 +286,7 @@ export default function HomePage() {
         {/* Quick Feeds */}
         <section className="py-6 grid grid-cols-3 gap-2.5">
           <Link
-            href={`/search?when=${urgency.toLowerCase()}&feed=available`}
+            href={`/search?${buildSearchParams()}&feed=available`}
             className="rounded-xl border border-neutral-800 bg-neutral-950 p-3.5 text-center hover:border-neutral-600 transition"
           >
             <div className="text-[11px] font-bold tracking-wider uppercase text-white">
@@ -218,7 +295,7 @@ export default function HomePage() {
           </Link>
 
           <Link
-            href={`/search?when=${urgency.toLowerCase()}&feed=popular`}
+            href={`/search?${buildSearchParams()}&feed=popular`}
             className="rounded-xl border border-neutral-800 bg-neutral-950 p-3.5 text-center hover:border-neutral-600 transition"
           >
             <div className="text-[11px] font-bold tracking-wider uppercase text-white">
@@ -227,7 +304,7 @@ export default function HomePage() {
           </Link>
 
           <Link
-            href={`/search?when=${urgency.toLowerCase()}&feed=recent`}
+            href={`/search?${buildSearchParams()}&feed=recent`}
             className="rounded-xl border border-neutral-800 bg-neutral-950 p-3.5 text-center hover:border-neutral-600 transition"
           >
             <div className="text-[11px] font-bold tracking-wider uppercase text-white">
@@ -246,7 +323,7 @@ export default function HomePage() {
                   ON DISPATCH
                 </h2>
                 <Link
-                  href="/search"
+                  href={`/search?${buildSearchParams()}`}
                   className="text-xs font-semibold text-neutral-400 hover:text-white transition"
                 >
                   VIEW ALL →
@@ -259,7 +336,7 @@ export default function HomePage() {
                   const initial = displayName.charAt(0).toUpperCase()
                   const profileHref = person.username
                     ? `/u/${person.username}`
-                    : `/dashboard/book/${person.id}?when=${urgency.toLowerCase()}`
+                    : buildBookHref(person.id)
 
                   return (
                     <div
@@ -296,7 +373,7 @@ export default function HomePage() {
                       </Link>
 
                       <Link
-                        href={`/dashboard/book/${person.id}?when=${urgency.toLowerCase()}`}
+                        href={buildBookHref(person.id)}
                         className="shrink-0 rounded-lg bg-white px-3.5 py-2 text-[11px] font-bold tracking-wider uppercase text-black hover:bg-neutral-200 transition"
                       >
                         PULL UP

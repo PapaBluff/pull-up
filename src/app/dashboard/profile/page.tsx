@@ -10,9 +10,30 @@ type ProfileLink = {
   url: string
 }
 
+function normalizeAndValidateUrl(rawInput: string): string | null {
+  const trimmed = rawInput.trim()
+  if (!trimmed) return null
+
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+
+  try {
+    const parsed = new URL(withProtocol)
+    // Must be http/https and contain a valid domain with a dot (e.g., instagram.com)
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      !parsed.hostname.includes('.') ||
+      parsed.hostname.endsWith('.')
+    ) {
+      return null
+    }
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
 export default function ProfileEditorPage() {
   const router = useRouter()
-  const supabase = createClient()
 
   const avatarInputRef = useRef<HTMLInputElement | null>(null)
   const contentInputRef = useRef<HTMLInputElement | null>(null)
@@ -30,10 +51,11 @@ export default function ProfileEditorPage() {
   const [hourlyRate, setHourlyRate] = useState('')
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null)
 
-  // Clickable links & uploaded content
   const [links, setLinks] = useState<ProfileLink[]>([])
   const [newLinkLabel, setNewLinkLabel] = useState('')
   const [newLinkUrl, setNewLinkUrl] = useState('')
+  const [linkError, setLinkError] = useState<string | null>(null)
+
   const [mediaUrls, setMediaUrls] = useState<string[]>([])
 
   const [loading, setLoading] = useState(true)
@@ -42,8 +64,16 @@ export default function ProfileEditorPage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
+  // Required media count based on account role: 5 for talent/host-creator, 3 for bookers
+  const requiredMediaCount = role === 'creator' ? 5 : 3
+  const hasAvatar = Boolean(avatarUrl.trim())
+  const hasEnoughMedia = mediaUrls.length >= requiredMediaCount
+
   useEffect(() => {
+    let isMounted = true
+
     async function loadProfile() {
+      const supabase = createClient()
       const {
         data: { user },
       } = await supabase.auth.getUser()
@@ -53,12 +83,9 @@ export default function ProfileEditorPage() {
         return
       }
 
-      setUserId(user.id)
-      setEmail(user.email || '')
-
       const meta = user.user_metadata || {}
 
-      const { data: profile } = await supabase
+      const { data: profile, error } = await supabase
         .from('profiles')
         .select(
           'username, full_name, avatar_url, bio, links, media_urls, role, hourly_rate, stripe_account_id, phone_number'
@@ -66,16 +93,29 @@ export default function ProfileEditorPage() {
         .eq('id', user.id)
         .maybeSingle()
 
-      setFullName(profile?.full_name || meta.full_name || '')
-      setUsername(profile?.username || meta.username || '')
-      setRole(
-        (profile?.role || meta.role) === 'creator' ? 'creator' : 'host'
+      if (!isMounted) return
+
+      if (error) {
+        setMessage({ type: 'error', text: `Failed to load profile: ${error.message}` })
+      }
+
+      setUserId(user.id)
+      setEmail(user.email || '')
+      setFullName(profile?.full_name ?? meta.full_name ?? '')
+      setUsername(profile?.username ?? meta.username ?? '')
+
+      const resolvedRole = profile?.role || meta.role
+      setRole(resolvedRole === 'creator' ? 'creator' : 'host')
+
+      setAvatarUrl(profile?.avatar_url ?? '')
+      setBio(profile?.bio ?? '')
+      setPhoneNumber(profile?.phone_number ?? '')
+      setHourlyRate(
+        profile?.hourly_rate !== null && profile?.hourly_rate !== undefined
+          ? String(profile.hourly_rate)
+          : ''
       )
-      setAvatarUrl(profile?.avatar_url || '')
-      setBio(profile?.bio || '')
-      setPhoneNumber(profile?.phone_number || '')
-      setHourlyRate(profile?.hourly_rate != null ? String(profile.hourly_rate) : '')
-      setStripeAccountId(profile?.stripe_account_id || null)
+      setStripeAccountId(profile?.stripe_account_id ?? null)
       setLinks(Array.isArray(profile?.links) ? profile.links : [])
       setMediaUrls(Array.isArray(profile?.media_urls) ? profile.media_urls : [])
 
@@ -83,12 +123,16 @@ export default function ProfileEditorPage() {
     }
 
     loadProfile()
-  }, [supabase, router])
+    return () => {
+      isMounted = false
+    }
+  }, [router])
 
   async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file || !userId) return
 
+    const supabase = createClient()
     setUploadingAvatar(true)
     setMessage(null)
 
@@ -111,12 +155,14 @@ export default function ProfileEditorPage() {
 
     setAvatarUrl(publicData.publicUrl)
     setUploadingAvatar(false)
+    if (avatarInputRef.current) avatarInputRef.current.value = ''
   }
 
   async function handleContentUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
     if (!files || files.length === 0 || !userId) return
 
+    const supabase = createClient()
     setUploadingMedia(true)
     setMessage(null)
 
@@ -151,16 +197,20 @@ export default function ProfileEditorPage() {
   }
 
   function handleAddLink() {
+    setLinkError(null)
     const label = newLinkLabel.trim()
-    let url = newLinkUrl.trim()
-    if (!url) return
-    if (!/^https?:\/\//i.test(url)) {
-      url = `https://${url}`
+    const validUrl = normalizeAndValidateUrl(newLinkUrl)
+
+    if (!validUrl) {
+      setLinkError('Enter a valid website or social URL (e.g., https://instagram.com/yourhandle).')
+      return
     }
+
+    const parsedHost = new URL(validUrl).hostname.replace(/^www\./, '')
 
     setLinks((prev) => [
       ...prev,
-      { label: label || url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0], url },
+      { label: label || parsedHost, url: validUrl },
     ])
     setNewLinkLabel('')
     setNewLinkUrl('')
@@ -178,8 +228,28 @@ export default function ProfileEditorPage() {
     e.preventDefault()
     if (!userId) return
 
-    setSaving(true)
     setMessage(null)
+
+    // 1. Enforce profile photo requirement
+    if (!hasAvatar) {
+      setMessage({
+        type: 'error',
+        text: 'Please upload a profile picture before saving your profile.',
+      })
+      return
+    }
+
+    // 2. Enforce minimum media count (5 for talent/creators, 3 for bookers)
+    if (!hasEnoughMedia) {
+      const remaining = requiredMediaCount - mediaUrls.length
+      setMessage({
+        type: 'error',
+        text: `${
+          role === 'creator' ? 'Talent profiles' : 'Booking profiles'
+        } require at least ${requiredMediaCount} uploaded photos/media items (${mediaUrls.length}/${requiredMediaCount} uploaded — add ${remaining} more).`,
+      })
+      return
+    }
 
     const cleanUsername = username
       .trim()
@@ -190,12 +260,28 @@ export default function ProfileEditorPage() {
     const cleanName = fullName.trim()
 
     if (cleanUsername.length < 3) {
-      setMessage({ type: 'error', text: 'Handle must be at least 3 characters.' })
-      setSaving(false)
+      setMessage({ type: 'error', text: 'Username must be at least 3 characters.' })
       return
     }
 
-    // Check uniqueness against other users before saving
+    // 3. Validate all saved links before writing
+    const validatedLinks: ProfileLink[] = []
+    for (const item of links) {
+      const valid = normalizeAndValidateUrl(item.url)
+      if (!valid) {
+        setMessage({
+          type: 'error',
+          text: `Invalid URL found in links: "${item.url}". Please fix or remove it.`,
+        })
+        return
+      }
+      validatedLinks.push({ label: item.label.trim() || valid, url: valid })
+    }
+
+    setSaving(true)
+    const supabase = createClient()
+
+    // 4. Enforce strict 1-of-1 unique username check
     const { data: handleConflict } = await supabase
       .from('profiles')
       .select('id')
@@ -204,7 +290,10 @@ export default function ProfileEditorPage() {
       .maybeSingle()
 
     if (handleConflict) {
-      setMessage({ type: 'error', text: `@${cleanUsername} is already taken by another user.` })
+      setMessage({
+        type: 'error',
+        text: `@${cleanUsername} is already taken. Usernames must be 1-of-1 unique.`,
+      })
       setSaving(false)
       return
     }
@@ -218,7 +307,10 @@ export default function ProfileEditorPage() {
         .maybeSingle()
 
       if (nameConflict) {
-        setMessage({ type: 'error', text: `"${cleanName}" is already taken. Choose a unique name.` })
+        setMessage({
+          type: 'error',
+          text: `"${cleanName}" is already taken. Choose a unique display name.`,
+        })
         setSaving(false)
         return
       }
@@ -233,9 +325,9 @@ export default function ProfileEditorPage() {
       id: userId,
       full_name: cleanName || null,
       username: cleanUsername,
-      avatar_url: avatarUrl || null,
+      avatar_url: avatarUrl,
       bio: bio.trim() || null,
-      links,
+      links: validatedLinks,
       media_urls: mediaUrls,
       phone_number: phoneNumber.trim() || null,
       role,
@@ -243,9 +335,17 @@ export default function ProfileEditorPage() {
     })
 
     if (error) {
-      setMessage({ type: 'error', text: error.message })
+      if (error.code === '23505') {
+        setMessage({
+          type: 'error',
+          text: 'That username or display name is already claimed by another user.',
+        })
+      } else {
+        setMessage({ type: 'error', text: error.message })
+      }
     } else {
       setUsername(cleanUsername)
+      setLinks(validatedLinks)
       setEditingIdentity(false)
       setMessage({ type: 'success', text: 'Profile saved.' })
       router.refresh()
@@ -266,7 +366,7 @@ export default function ProfileEditorPage() {
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center">
-      {/* Clean Top Bar */}
+      {/* Top Bar */}
       <header className="w-full max-w-2xl px-6 py-6 flex items-center justify-between">
         <Link href="/" className="text-lg font-extrabold tracking-tight">
           PULL UP
@@ -291,13 +391,15 @@ export default function ProfileEditorPage() {
       </header>
 
       <main className="w-full max-w-xl px-6 pb-20 flex flex-col">
-        {/* Identity Summary Header (Already collected at signup, editable via toggle) */}
+        {/* Identity & Required Avatar Header */}
         <section className="pt-4 pb-6 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <button
               type="button"
               onClick={() => avatarInputRef.current?.click()}
-              className="relative group h-16 w-16 rounded-full overflow-hidden border border-neutral-700 bg-neutral-900 flex items-center justify-center shrink-0"
+              className={`relative group h-16 w-16 rounded-full overflow-hidden border ${
+                hasAvatar ? 'border-neutral-700' : 'border-amber-500'
+              } bg-neutral-900 flex items-center justify-center shrink-0`}
             >
               {avatarUrl ? (
                 <img
@@ -325,7 +427,11 @@ export default function ProfileEditorPage() {
                 onClick={() => avatarInputRef.current?.click()}
                 className="mt-1.5 text-[11px] font-bold uppercase tracking-wider text-white underline"
               >
-                {uploadingAvatar ? 'UPLOADING PHOTO...' : 'UPLOAD PROFILE PHOTO'}
+                {uploadingAvatar
+                  ? 'UPLOADING PHOTO...'
+                  : hasAvatar
+                  ? 'CHANGE PROFILE PHOTO'
+                  : 'UPLOAD PROFILE PHOTO (REQUIRED)'}
               </button>
               <input
                 ref={avatarInputRef}
@@ -349,7 +455,7 @@ export default function ProfileEditorPage() {
         <hr className="border-neutral-800" />
 
         <form onSubmit={handleSave} className="py-6 space-y-6">
-          {/* Collapsible Identity & Role Settings (Only shown if user clicks Edit Account) */}
+          {/* Collapsible Identity & Role Settings */}
           {editingIdentity && (
             <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-5 space-y-4">
               <div className="text-xs font-bold tracking-widest uppercase text-neutral-400">
@@ -366,7 +472,7 @@ export default function ProfileEditorPage() {
                       : 'bg-black text-neutral-300 border-neutral-800'
                   }`}
                 >
-                  BOOK PEOPLE
+                  BOOK PEOPLE (3+ PICS)
                 </button>
                 <button
                   type="button"
@@ -377,7 +483,7 @@ export default function ProfileEditorPage() {
                       : 'bg-black text-neutral-300 border-neutral-800'
                   }`}
                 >
-                  PULL UP AS TALENT
+                  PULL UP AS TALENT (5+ PICS)
                 </button>
               </div>
 
@@ -395,7 +501,7 @@ export default function ProfileEditorPage() {
 
               <div>
                 <label className="block text-[11px] font-bold tracking-widest uppercase text-neutral-400 mb-1.5">
-                  HANDLE
+                  UNIQUE USERNAME (1 OF 1)
                 </label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-neutral-500">
@@ -437,10 +543,10 @@ export default function ProfileEditorPage() {
             </div>
           </div>
 
-          {/* Clickable URLs / Links Section */}
+          {/* Verifiable & Clickable URLs / Social Links Section */}
           <div className="space-y-3">
             <label className="block text-xs font-bold tracking-widest uppercase text-neutral-400">
-              LINKS & SOCIALS
+              VERIFIABLE LINKS & SOCIALS
             </label>
 
             {links.length > 0 && (
@@ -463,13 +569,23 @@ export default function ProfileEditorPage() {
                         {item.url}
                       </div>
                     </a>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveLink(idx)}
-                      className="text-xs text-neutral-500 hover:text-red-400 transition px-2"
-                    >
-                      REMOVE
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-lg border border-neutral-700 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-neutral-200 hover:border-white hover:text-white transition"
+                      >
+                        VERIFY ↗
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveLink(idx)}
+                        className="text-xs text-neutral-500 hover:text-red-400 transition px-1.5"
+                      >
+                        REMOVE
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -484,7 +600,7 @@ export default function ProfileEditorPage() {
                 className="sm:col-span-2 rounded-xl bg-neutral-900 border border-neutral-800 px-3.5 py-3 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-white"
               />
               <input
-                type="text"
+                type="url"
                 value={newLinkUrl}
                 onChange={(e) => setNewLinkUrl(e.target.value)}
                 placeholder="https://instagram.com/you"
@@ -498,14 +614,28 @@ export default function ProfileEditorPage() {
                 ADD
               </button>
             </div>
+
+            {linkError && (
+              <p className="text-xs text-red-400">{linkError}</p>
+            )}
           </div>
 
-          {/* Content & Media Upload Section */}
+          {/* Required Photos & Content Upload Section */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold tracking-widest uppercase text-neutral-400">
-                PHOTOS & CONTENT
-              </label>
+              <div>
+                <label className="block text-xs font-bold tracking-widest uppercase text-neutral-400">
+                  PHOTOS & CONTENT (MIN {requiredMediaCount} REQUIRED)
+                </label>
+                <span
+                  className={`text-[11px] font-semibold ${
+                    hasEnoughMedia ? 'text-emerald-400' : 'text-amber-400'
+                  }`}
+                >
+                  {mediaUrls.length}/{requiredMediaCount} uploaded
+                </span>
+              </div>
+
               <button
                 type="button"
                 onClick={() => contentInputRef.current?.click()}
@@ -531,7 +661,7 @@ export default function ProfileEditorPage() {
                 className="w-full rounded-xl border border-dashed border-neutral-800 bg-neutral-950 p-6 text-center hover:border-neutral-600 transition"
               >
                 <p className="text-xs font-semibold text-white">
-                  Upload photos or short clips to showcase your vibe
+                  Upload at least {requiredMediaCount} photos or clips to verify your profile
                 </p>
                 <p className="text-[11px] text-neutral-500 mt-1">
                   JPG, PNG, WEBP, or MP4
@@ -657,7 +787,7 @@ export default function ProfileEditorPage() {
 
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || uploadingAvatar || uploadingMedia}
             className="w-full rounded-xl bg-white py-4 text-xs font-bold tracking-wider uppercase text-black hover:bg-neutral-200 disabled:opacity-50 transition"
           >
             {saving ? 'SAVING...' : 'SAVE PROFILE'}
